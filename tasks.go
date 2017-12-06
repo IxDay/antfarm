@@ -5,6 +5,12 @@ import (
 	"time"
 )
 
+type Noop struct{}
+
+func (n Noop) Stop() error           { return nil }
+func (n Noop) Expect() (bool, error) { return false, nil }
+func (n Noop) Start() error          { return nil }
+
 type Print struct{ message string }
 
 func (p Print) Stop() error           { return nil }
