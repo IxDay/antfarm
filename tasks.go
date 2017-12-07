@@ -7,14 +7,12 @@ import (
 
 type Noop struct{}
 
-func (n Noop) Stop() error           { return nil }
-func (n Noop) Expect() (bool, error) { return false, nil }
-func (n Noop) Start() error          { return nil }
+func (n Noop) Stop() error  { return nil }
+func (n Noop) Start() error { return nil }
 
 type Print struct{ message string }
 
-func (p Print) Stop() error           { return nil }
-func (p Print) Expect() (bool, error) { return false, nil }
+func (p Print) Stop() error { return nil }
 func (p Print) Start() error {
 	fmt.Println(p.message)
 	return nil
@@ -29,7 +27,6 @@ func NewWait(d time.Duration) *Wait {
 	return &Wait{duration: d}
 }
 
-func (w *Wait) Expect() (bool, error) { return false, nil }
 func (w *Wait) Stop() error {
 	if w.timer == nil {
 		return nil

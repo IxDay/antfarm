@@ -8,10 +8,10 @@ import (
 func main() {
 
 	err := NewRunner().
-		Task("wait", NewWait(5*time.Second), "foo", "bar", "world").
-		Task("world", Print{"Hello World!"}).
+		Task("wait", NewWait(5*time.Second), "foo", "bar").
+		Task("world", Print{"Hello World!"}, "wait").
 		Task("foo", Print{"Hello Foo!"}).
 		Task("bar", Print{"Hello Bar!"}, "foo").
-		Start("wait")
+		Start("world")
 	fmt.Println(err)
 }
