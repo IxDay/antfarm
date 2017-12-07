@@ -1,8 +1,9 @@
 package main
 
 import (
-	"context"
 	"fmt"
+	"os"
+	"os/signal"
 )
 
 type (
@@ -20,10 +21,7 @@ type (
 
 	Runner struct {
 		Tree map[string]Node
-	}
-
-	Resolver struct {
-		seen, resolved []string
+		Done chan bool
 	}
 )
 
@@ -37,7 +35,7 @@ func in(value string, array []string) bool {
 }
 
 func NewRunner() *Runner {
-	return &Runner{map[string]Node{}}
+	return &Runner{Tree: map[string]Node{}, Done: make(chan bool)}
 }
 
 func (r *Runner) Task(name string, task Task, deps ...string) *Runner {
@@ -45,63 +43,77 @@ func (r *Runner) Task(name string, task Task, deps ...string) *Runner {
 	return r
 }
 
-func (r *Resolver) Resolve(node Node, tree map[string]Node) error {
-	r.seen = append(r.seen, node.Name)
-	for _, dep := range node.Deps {
-		if !in(dep, r.resolved) {
-			if in(dep, r.seen) {
-				return fmt.Errorf("circular dependency detected")
-			}
-			node, ok := tree[dep]
-			if !ok {
-				return fmt.Errorf("dependency not found")
-			}
-			if err := r.Resolve(node, tree); err != nil {
-				return err
+func (r *Runner) Resolve(node Node) ([]string, error) {
+	var seen, resolved []string
+	var resolve func(node Node) error
+
+	resolve = func(node Node) error {
+		seen = append(seen, node.Name)
+		for _, dep := range node.Deps {
+			if !in(dep, resolved) {
+				if in(dep, seen) {
+					return fmt.Errorf("circular dependency detected")
+				}
+				node, ok := r.Tree[dep]
+				if !ok {
+					return fmt.Errorf("dependency not found")
+				}
+				if err := resolve(node); err != nil {
+					return err
+				}
 			}
 		}
+		resolved = append(resolved, node.Name)
+		return nil
 	}
-	r.resolved = append(r.resolved, node.Name)
-	return nil
+	return resolved, resolve(node)
 }
 
-func (r *Runner) Start(tasks ...string) error {
-	resolver := Resolver{}
-	scheduler := make(map[string]chan bool, len(r.Tree))
-	ctx, cancel := context.WithCancel(context.Background())
-	root := r.Task("", Noop{}, tasks...).Tree[""]
+func (r *Runner) clean(resolved []string) {
+	// stop in reverse order (can be parallelized)
+	go func() {
+		for i := len(resolved) - 1; i >= 0; i-- {
+			r.Tree[resolved[i]].Task.Stop()
+		}
+		r.Done <- true
+	}()
+}
 
-	if err := resolver.Resolve(root, r.Tree); err != nil {
+func (runner *Runner) Start(tasks ...string) error {
+	scheduler := make(map[string]chan bool, len(runner.Tree))
+	root := runner.Task("", Noop{}, tasks...).Tree[""]
+	interrupt := make(chan os.Signal)
+	resolved, err := runner.Resolve(root)
+
+	if err != nil {
 		return err
 	}
 
-	for _, name := range resolver.resolved {
-		scheduler[name] = r.Tree[name].Done
+	signal.Notify(interrupt, os.Interrupt)
+	go func() {
+		for _ = range interrupt {
+			fmt.Println("\nReceived an interrupt, stopping services...\n")
+			runner.clean(resolved)
+		}
+	}()
+
+	for _, name := range resolved {
+		scheduler[name] = runner.Tree[name].Done
 		go func(node Node) {
 			for _, dep := range node.Deps {
 				<-scheduler[dep] // wait for dependencies to finish
 			}
 			if err := node.Task.Start(); err != nil { // start job
-				cancel()
+				runner.clean(resolved)
 			}
 			close(node.Done)
 			return
-		}(r.Tree[name])
-		go func(node Node) {
-			for {
-				select {
-				case <-ctx.Done():
-					fmt.Printf("aborting: %s", node.Name)
-					node.Task.Stop()
-					return // returning not to leak the goroutine
-				}
-			}
-		}(r.Tree[name])
+		}(runner.Tree[name])
 	}
-	<-root.Done
-
-	for i := len(resolver.resolved) - 1; i >= 0; i-- {
-		r.Tree[resolver.resolved[i]].Task.Stop() // stop in reverse order (can be parallelized)
+	select {
+	case <-root.Done:
+		runner.clean(resolved)
+	case <-runner.Done:
 	}
 	return nil
 }
