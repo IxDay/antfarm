@@ -13,6 +13,6 @@ func main() {
 		Task("foo", Print{"Hello Foo!"}).
 		Task("bar", Print{"Hello Bar!"}, "foo").
 		Task("copy", FileCopy("main.go", "/tmp/main.go")).
-		Start("copy")
+		Start("wait")
 	fmt.Println(err)
 }

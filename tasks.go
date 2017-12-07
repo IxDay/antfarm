@@ -9,12 +9,12 @@ import (
 
 type Noop struct{}
 
-func (n Noop) Stop() error  { return nil }
-func (n Noop) Start() error { return nil }
+func (n Noop) Stop(err error) error { return nil }
+func (n Noop) Start() error         { return nil }
 
 type Print struct{ message string }
 
-func (p Print) Stop() error { return nil }
+func (p Print) Stop(err error) error { return nil }
 func (p Print) Start() error {
 	fmt.Println(p.message)
 	return nil
@@ -29,7 +29,7 @@ func NewWait(d time.Duration) *Wait {
 	return &Wait{duration: d}
 }
 
-func (w *Wait) Stop() error {
+func (w *Wait) Stop(err error) error {
 	if w.timer == nil {
 		return nil
 	}
@@ -61,7 +61,11 @@ func (p Provision) Start() error {
 	return nil
 }
 
-func (p Provision) Stop() error { return nil }
+func (p Provision) Stop(err error) error {
+	if err != nil {
+	}
+	return nil
+}
 
 type fileCopy struct {
 	source, destination string

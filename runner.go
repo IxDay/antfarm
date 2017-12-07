@@ -9,7 +9,7 @@ import (
 type (
 	Task interface {
 		Start() error
-		Stop() error
+		Stop(error) error
 	}
 
 	Node struct {
@@ -21,7 +21,7 @@ type (
 
 	Runner struct {
 		Tree map[string]Node
-		Done chan bool
+		Done chan error
 	}
 )
 
@@ -35,7 +35,7 @@ func in(value string, array []string) bool {
 }
 
 func NewRunner() *Runner {
-	return &Runner{Tree: map[string]Node{}, Done: make(chan bool)}
+	return &Runner{map[string]Node{}, make(chan error)}
 }
 
 func (r *Runner) Task(name string, task Task, deps ...string) *Runner {
@@ -69,13 +69,14 @@ func (r *Runner) Resolve(node Node) ([]string, error) {
 	return resolved, resolve(node)
 }
 
-func (r *Runner) clean(resolved []string) {
+func (r *Runner) clean(resolved []string, err error) {
 	// stop in reverse order (can be parallelized)
 	go func() {
 		for i := len(resolved) - 1; i >= 0; i-- {
-			r.Tree[resolved[i]].Task.Stop()
+			// have to store errors
+			r.Tree[resolved[i]].Task.Stop(err)
 		}
-		r.Done <- true
+		r.Done <- err
 	}()
 }
 
@@ -92,8 +93,7 @@ func (runner *Runner) Start(tasks ...string) error {
 	signal.Notify(interrupt, os.Interrupt)
 	go func() {
 		for _ = range interrupt {
-			fmt.Println("\nReceived an interrupt, stopping services...\n")
-			runner.clean(resolved)
+			runner.clean(resolved, fmt.Errorf("Received an interrupt..."))
 		}
 	}()
 
@@ -103,8 +103,8 @@ func (runner *Runner) Start(tasks ...string) error {
 			for _, dep := range node.Deps {
 				<-scheduler[dep] // wait for dependencies to finish
 			}
-			if err := node.Task.Start(); err != nil { // start job
-				runner.clean(resolved)
+			if err = node.Task.Start(); err != nil { // start job
+				runner.clean(resolved, err)
 			}
 			close(node.Done)
 			return
@@ -112,8 +112,8 @@ func (runner *Runner) Start(tasks ...string) error {
 	}
 	select {
 	case <-root.Done:
-		runner.clean(resolved)
-	case <-runner.Done:
+		runner.clean(resolved, nil)
+	case err = <-runner.Done:
 	}
-	return nil
+	return err
 }
