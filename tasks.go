@@ -1,4 +1,4 @@
-package main
+package antfarm
 
 import (
 	"fmt"
@@ -12,11 +12,11 @@ type Noop struct{}
 func (n Noop) Stop(err error) error { return nil }
 func (n Noop) Start() error         { return nil }
 
-type Print struct{ message string }
+type Print struct{ Message string }
 
 func (p Print) Stop(err error) error { return nil }
 func (p Print) Start() error {
-	fmt.Println(p.message)
+	fmt.Println(p.Message)
 	return nil
 }
 
