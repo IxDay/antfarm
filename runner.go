@@ -1,6 +1,7 @@
 package antfarm
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/signal"
@@ -8,15 +9,15 @@ import (
 
 type (
 	Task interface {
-		Start() error
-		Stop(error) error
+		Start(context.Context) error
 	}
 
 	Node struct {
 		Name string
 		Task Task
-		Done chan bool
 		Deps []string
+		context.Context
+		context.CancelFunc
 	}
 
 	Runner struct {
@@ -34,12 +35,17 @@ func in(value string, array []string) bool {
 	return false
 }
 
+type TaskFunc func(context.Context) error
+
+func (tf TaskFunc) Start(ctx context.Context) error { return tf(ctx) }
+
 func NewRunner() *Runner {
 	return &Runner{map[string]Node{}, make(chan error)}
 }
 
 func (r *Runner) Task(name string, task Task, deps ...string) *Runner {
-	r.Tree[name] = Node{name, task, make(chan bool), deps}
+	ctx, cancel := context.WithCancel(context.Background())
+	r.Tree[name] = Node{name, task, deps, ctx, cancel}
 	return r
 }
 
@@ -73,16 +79,14 @@ func (r *Runner) clean(resolved []string, err error) {
 	// stop in reverse order (can be parallelized)
 	go func() {
 		for i := len(resolved) - 1; i >= 0; i-- {
-			// have to store errors
-			r.Tree[resolved[i]].Task.Stop(err)
+			r.Tree[resolved[i]].CancelFunc()
 		}
 		r.Done <- err
 	}()
 }
 
 func (runner *Runner) Start(tasks ...string) error {
-	scheduler := make(map[string]chan bool, len(runner.Tree))
-	root := runner.Task("", Noop{}, tasks...).Tree[""]
+	root := runner.Task("", Noop(), tasks...).Tree[""]
 	interrupt := make(chan os.Signal)
 	resolved, err := runner.Resolve(root)
 
@@ -93,27 +97,33 @@ func (runner *Runner) Start(tasks ...string) error {
 	signal.Notify(interrupt, os.Interrupt)
 	go func() {
 		for _ = range interrupt {
-			runner.clean(resolved, fmt.Errorf("Received an interrupt..."))
+			runner.clean(resolved, fmt.Errorf("Aborting due to ^C..."))
 		}
 	}()
 
 	for _, name := range resolved {
-		scheduler[name] = runner.Tree[name].Done
 		go func(node Node) {
 			for _, dep := range node.Deps {
-				<-scheduler[dep] // wait for dependencies to finish
+				<-runner.Tree[dep].Context.Done() // wait for dependencies to finish
 			}
-			if err = node.Task.Start(); err != nil { // start job
-				runner.clean(resolved, err)
+			select {
+			case <-node.Context.Done():
+				return
+			default:
+				if err = node.Task.Start(node.Context); err != nil { // start job
+					runner.clean(resolved, err)
+				} else {
+					node.CancelFunc()
+				}
 			}
-			close(node.Done)
 			return
 		}(runner.Tree[name])
 	}
+
 	select {
-	case <-root.Done:
-		runner.clean(resolved, nil)
 	case err = <-runner.Done:
+		fmt.Println(err)
+	case <-root.Context.Done():
 	}
 	return err
 }

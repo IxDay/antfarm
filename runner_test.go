@@ -1,24 +1,17 @@
 package antfarm
 
 import (
+	"context"
 	"testing"
 )
 
 type buffer []string
 
-type bufferTask struct {
-	buffer  *buffer
-	message string
-}
-
-func (bt bufferTask) Stop(_ error) error { return nil }
-func (bt bufferTask) Start() error {
-	*bt.buffer = append(*bt.buffer, bt.message)
-	return nil
-}
-
 func (b *buffer) NewTask(message string) Task {
-	return bufferTask{b, message}
+	return TaskFunc(func(ctx context.Context) error {
+		*b = append(*b, message)
+		return nil
+	})
 }
 
 func compare(t *testing.T, a1, a2 []string) {
@@ -40,4 +33,7 @@ func TestDependencyOrder(t *testing.T) {
 		Task("bar", buffer.NewTask("bar"), "foo").
 		Start("world")
 	compare(t, []string(*buffer), []string{"foo", "bar", "world"})
+}
+
+func TestErrorPropagation(t *testing.T) {
 }
