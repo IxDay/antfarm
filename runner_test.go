@@ -27,7 +27,7 @@ func compare(t *testing.T, a1, a2 []string) {
 
 func TestDependencyOrder(t *testing.T) {
 	buffer := &buffer{}
-	NewRunner().
+	Runner{}.
 		Task("world", buffer.NewTask("world"), "bar", "foo").
 		Task("foo", buffer.NewTask("foo")).
 		Task("bar", buffer.NewTask("bar"), "foo").

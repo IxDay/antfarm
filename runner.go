@@ -16,15 +16,19 @@ type (
 		Name string
 		Task Task
 		Deps []string
-		context.Context
-		context.CancelFunc
 	}
 
-	Runner struct {
-		Tree map[string]Node
-		Done chan error
+	Runner map[string]Node
+
+	state struct {
+		context.CancelFunc
+		Done chan bool
 	}
 )
+
+type TaskFunc func(context.Context) error
+
+func (tf TaskFunc) Start(ctx context.Context) error { return tf(ctx) }
 
 func in(value string, array []string) bool {
 	for _, elt := range array {
@@ -35,21 +39,21 @@ func in(value string, array []string) bool {
 	return false
 }
 
-type TaskFunc func(context.Context) error
-
-func (tf TaskFunc) Start(ctx context.Context) error { return tf(ctx) }
-
-func NewRunner() *Runner {
-	return &Runner{map[string]Node{}, make(chan error)}
+func reverse(array []string) []string {
+	out := make([]string, len(array))
+	l := len(array) - 1
+	for j := range out {
+		out[j] = array[l-j]
+	}
+	return out
 }
 
-func (r *Runner) Task(name string, task Task, deps ...string) *Runner {
-	ctx, cancel := context.WithCancel(context.Background())
-	r.Tree[name] = Node{name, task, deps, ctx, cancel}
+func (r Runner) Task(name string, task Task, deps ...string) Runner {
+	r[name] = Node{name, task, deps}
 	return r
 }
 
-func (r *Runner) Resolve(node Node) ([]string, error) {
+func (r Runner) Resolve(node Node) ([]string, error) {
 	var seen, resolved []string
 	var resolve func(node Node) error
 
@@ -60,7 +64,7 @@ func (r *Runner) Resolve(node Node) ([]string, error) {
 				if in(dep, seen) {
 					return fmt.Errorf("circular dependency detected")
 				}
-				node, ok := r.Tree[dep]
+				node, ok := r[dep]
 				if !ok {
 					return fmt.Errorf("dependency not found")
 				}
@@ -75,55 +79,74 @@ func (r *Runner) Resolve(node Node) ([]string, error) {
 	return resolved, resolve(node)
 }
 
-func (r *Runner) clean(resolved []string, err error) {
-	// stop in reverse order (can be parallelized)
-	go func() {
-		for i := len(resolved) - 1; i >= 0; i-- {
-			r.Tree[resolved[i]].CancelFunc()
+func clean(running map[string]state, resolved []string, done chan error) (err error) {
+	cleaned := make(chan bool)
+	for {
+		select {
+		case e := <-done:
+			if e == nil || err != nil { // ensure only one cleaning is running
+				continue
+			}
+			err = e // save error
+			go func() {
+				defer close(cleaned)                     // close channel only when all tasks are canceled
+				for _, name := range reverse(resolved) { // ensure all task are closed
+					running[name].CancelFunc()
+					<-running[name].Done
+				}
+			}()
+		case <-running[""].Done:
+			if err == nil { // if an error exists, there's a cleaning running
+				return
+			}
+		case <-cleaned:
+			return
 		}
-		r.Done <- err
-	}()
+	}
 }
 
-func (runner *Runner) Start(tasks ...string) error {
-	root := runner.Task("", Noop(), tasks...).Tree[""]
-	interrupt := make(chan os.Signal)
+func abort() Task {
+	return TaskFunc(func(ctx context.Context) error {
+		interrupt := make(chan os.Signal)
+		signal.Notify(interrupt, os.Interrupt)
+		select {
+		case <-interrupt:
+			fmt.Println()
+			return fmt.Errorf("Aborting due to ^C...")
+		case <-ctx.Done():
+		}
+		return nil
+	})
+}
+
+func noop() Task { return TaskFunc(func(_ context.Context) error { return nil }) }
+
+func (runner Runner) Start(tasks ...string) error {
+	done := make(chan error)
+	running := map[string]state{}
+	root := runner.Task("abort", abort()).Task("", noop(), tasks...)[""]
 	resolved, err := runner.Resolve(root)
 
 	if err != nil {
 		return err
 	}
 
-	signal.Notify(interrupt, os.Interrupt)
-	go func() {
-		for _ = range interrupt {
-			runner.clean(resolved, fmt.Errorf("Aborting due to ^C..."))
-		}
-	}()
+	for _, name := range append(resolved, "abort") {
+		ctx, cancel := context.WithCancel(context.Background())
+		running[name] = state{cancel, make(chan bool)}
 
-	for _, name := range resolved {
-		go func(node Node) {
+		go func(ctx context.Context, node Node, s state) {
+			defer close(s.Done)
 			for _, dep := range node.Deps {
-				<-runner.Tree[dep].Context.Done() // wait for dependencies to finish
-			}
-			select {
-			case <-node.Context.Done():
-				return
-			default:
-				if err = node.Task.Start(node.Context); err != nil { // start job
-					runner.clean(resolved, err)
-				} else {
-					node.CancelFunc()
+				select {
+				case <-ctx.Done(): // if interrupt don't wait any longer
+					return
+				case <-running[dep].Done: // wait for dependencies to finish
 				}
 			}
-			return
-		}(runner.Tree[name])
+			done <- node.Task.Start(ctx) // start job
+		}(ctx, runner[name], running[name])
 	}
 
-	select {
-	case err = <-runner.Done:
-		fmt.Println(err)
-	case <-root.Context.Done():
-	}
-	return err
+	return clean(running, resolved, done)
 }
