@@ -2,6 +2,7 @@ package antfarm
 
 import (
 	"context"
+	"fmt"
 	"testing"
 )
 
@@ -13,6 +14,8 @@ func (b *buffer) NewTask(message string) Task {
 		return nil
 	})
 }
+
+func Error(err error) Task { return TaskFunc(func(_ context.Context) error { return err }) }
 
 func compare(t *testing.T, a1, a2 []string) {
 	if len(a1) != len(a2) {
@@ -36,4 +39,15 @@ func TestDependencyOrder(t *testing.T) {
 }
 
 func TestErrorPropagation(t *testing.T) {
+	ErrBar := fmt.Errorf("bar")
+	ErrBaz := fmt.Errorf("baz")
+
+	err := Runner{}.
+		Task("foo", Noop()).
+		Task("bar", Error(ErrBar), "foo").
+		Task("baz", Error(ErrBaz), "bar").
+		Start("baz")
+	if err != ErrBar {
+		t.Errorf("unexpected error type, got: %s, expected: %s", err, ErrBar)
+	}
 }
