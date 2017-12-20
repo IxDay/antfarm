@@ -7,6 +7,12 @@ import (
 	"os/signal"
 )
 
+var (
+	ErrDepNotFound = fmt.Errorf("dependency not found")
+	ErrDepCircular = fmt.Errorf("circular dependency detected")
+	ErrInterrupt   = fmt.Errorf("Aborting due to ^C...")
+)
+
 type (
 	Task interface {
 		Start(context.Context) error
@@ -62,11 +68,11 @@ func (r Runner) Resolve(node Node) ([]string, error) {
 		for _, dep := range node.Deps {
 			if !in(dep, resolved) {
 				if in(dep, seen) {
-					return fmt.Errorf("circular dependency detected")
+					return ErrDepCircular
 				}
 				node, ok := r[dep]
 				if !ok {
-					return fmt.Errorf("dependency not found")
+					return ErrDepNotFound
 				}
 				if err := resolve(node); err != nil {
 					return err
@@ -111,8 +117,7 @@ func abort() Task {
 		signal.Notify(interrupt, os.Interrupt)
 		select {
 		case <-interrupt:
-			fmt.Println()
-			return fmt.Errorf("Aborting due to ^C...")
+			return ErrInterrupt
 		case <-ctx.Done():
 		}
 		return nil
@@ -130,8 +135,9 @@ func (runner Runner) Start(tasks ...string) error {
 	if err != nil {
 		return err
 	}
+	resolved = append(resolved, "abort")
 
-	for _, name := range append(resolved, "abort") {
+	for _, name := range resolved {
 		ctx, cancel := context.WithCancel(context.Background())
 		running[name] = state{cancel, make(chan bool)}
 
