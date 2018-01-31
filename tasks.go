@@ -36,7 +36,7 @@ func Wait(d time.Duration) Task {
 
 type Provisioner interface {
 	Expect() (bool, error)
-	Provision(context.Context) error
+	Task
 	Abort()
 }
 
@@ -46,7 +46,7 @@ func Provision(provisioner Provisioner) Task {
 			return err
 		}
 
-		if err := provisioner.Provision(ctx); err != nil {
+		if err := provisioner.Start(ctx); err != nil {
 			provisioner.Abort()
 			return err
 		}
@@ -66,7 +66,7 @@ func (fc fileCopy) Expect() (ok bool, err error) {
 	}
 	return
 }
-func (fc fileCopy) Provision(ctx context.Context) error {
+func (fc fileCopy) Start(ctx context.Context) error {
 	buf := make([]byte, 32*1024)
 	in, err := os.Open(fc.source)
 	if err != nil {
