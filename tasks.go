@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"time"
 )
 
@@ -31,6 +32,16 @@ func Wait(d time.Duration) Task {
 			}
 		}
 		return nil
+	})
+}
+
+func Command(name string, options ...func(*exec.Cmd)) Task {
+	return TaskFunc(func(ctx context.Context) error {
+		cmd := exec.CommandContext(ctx, name)
+		for _, option := range options {
+			option(cmd)
+		}
+		return cmd.Run()
 	})
 }
 
