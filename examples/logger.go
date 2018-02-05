@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"github.com/ixday/antfarm"
+	"github.com/ixday/antfarm/tasks"
 	"time"
 )
 
@@ -24,9 +25,9 @@ func (r runner) Task(name string, task antfarm.Task, deps ...string) runner {
 
 func main() {
 	fmt.Println(NewRunner().
-		Task("wait", antfarm.Wait(5*time.Second)).
-		Task("world", antfarm.Print("Hello World!"), "bar", "foo").
-		Task("foo", antfarm.Print("Hello Foo!")).
-		Task("bar", antfarm.Print("Hello Bar!"), "foo", "wait").
+		Task("wait", tasks.Wait(5*time.Second)).
+		Task("world", tasks.Print("Hello World!"), "bar", "foo").
+		Task("foo", tasks.Print("Hello Foo!")).
+		Task("bar", tasks.Print("Hello Bar!"), "foo", "wait").
 		Start("world"))
 }

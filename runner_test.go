@@ -48,9 +48,9 @@ func TestDependencyOrder(t *testing.T) {
 
 func TestDependencyErr(t *testing.T) {
 	runner := Runner{}.
-		Task("foo", Noop(), "bar").
-		Task("bar", Noop(), "foo").
-		Task("baz", Noop(), "quz")
+		Task("foo", noop(), "bar").
+		Task("bar", noop(), "foo").
+		Task("baz", noop(), "quz")
 
 	unexpectedErr(t, runner.Start("baz"), ErrDepNotFound)
 	unexpectedErr(t, runner.Start("bar"), ErrDepCircular)
@@ -61,7 +61,7 @@ func TestErrorPropagation(t *testing.T) {
 	ErrBaz := fmt.Errorf("baz")
 
 	runner := Runner{}.
-		Task("foo", Noop()).
+		Task("foo", noop()).
 		Task("bar", Error(ErrBar), "foo").
 		Task("baz", Error(ErrBaz), "bar")
 
@@ -83,7 +83,7 @@ func TestInterrupt(t *testing.T) {
 					case <-ctx.Done():
 						return nil
 					default:
-						time.Sleep(1 * time.Second)
+						time.Sleep(50 * time.Millisecond)
 					}
 				}
 			})).

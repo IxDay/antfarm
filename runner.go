@@ -14,10 +14,6 @@ var (
 )
 
 type (
-	Task interface {
-		Start(context.Context) error
-	}
-
 	Node struct {
 		Name string
 		Task Task
@@ -31,10 +27,6 @@ type (
 		Done chan bool
 	}
 )
-
-type TaskFunc func(context.Context) error
-
-func (tf TaskFunc) Start(ctx context.Context) error { return tf(ctx) }
 
 func in(value string, array []string) bool {
 	for _, elt := range array {
