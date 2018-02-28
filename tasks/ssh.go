@@ -37,13 +37,6 @@ type SSH struct {
 	config *SSHConfig
 }
 
-func (ssh *SSH) Close() antfarm.Task {
-	return antfarm.TaskFunc(func(_ context.Context) error {
-		ssh.client.Close()
-		return nil
-	})
-}
-
 func NewSSH(options ...func(*SSHConfig)) *SSH {
 	sshConfig := &SSHConfig{Host: "localhost", Port: 22, PTY: SSHConfigPTY{
 		ssh.TerminalModes{
@@ -76,6 +69,7 @@ func NewSSH(options ...func(*SSHConfig)) *SSH {
 
 func (_ssh *SSH) Connect() antfarm.Task {
 	return antfarm.TaskFunc(func(ctx context.Context) (err error) {
+		fmt.Println("opening!")
 		_ssh.client, err = ssh.Dial(
 			"tcp",
 			fmt.Sprintf("%s:%d", _ssh.config.Host, _ssh.config.Port),
@@ -84,7 +78,20 @@ func (_ssh *SSH) Connect() antfarm.Task {
 				Auth:            _ssh.config.Auth,
 				HostKeyCallback: func(hostname string, remote net.Addr, key ssh.PublicKey) error { return nil },
 			})
+		go func(ctx context.Context) {
+
+			fmt.Println("opened!")
+			<-ctx.Done()
+			fmt.Println("closing!")
+		}(ctx)
 		return
+	})
+}
+
+func (ssh *SSH) Close() antfarm.Task {
+	return antfarm.TaskFunc(func(_ context.Context) error {
+		ssh.client.Close()
+		return nil
 	})
 }
 

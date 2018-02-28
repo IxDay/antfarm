@@ -3,14 +3,12 @@ package antfarm
 import (
 	"context"
 	"fmt"
-	"os"
-	"os/signal"
 )
 
 var (
 	ErrDepNotFound = fmt.Errorf("dependency not found")
 	ErrDepCircular = fmt.Errorf("circular dependency detected")
-	ErrInterrupt   = fmt.Errorf("Aborting due to ^C...")
+	ErrFinished    = fmt.Errorf("task running finished")
 )
 
 type (
@@ -20,11 +18,15 @@ type (
 		Deps []string
 	}
 
-	Runner map[string]Node
-
 	state struct {
-		context.CancelFunc
-		Done chan bool
+		context context.Context
+		cancel  context.CancelFunc
+		done    chan struct{}
+	}
+
+	Runner struct {
+		Resolver
+		Tasks map[string]Node
 	}
 )
 
@@ -46,12 +48,29 @@ func reverse(array []string) []string {
 	return out
 }
 
-func (r Runner) Task(name string, task Task, deps ...string) Runner {
-	r[name] = Node{name, task, deps}
+func newState(task Task) state {
+	ctx, cancel := context.WithCancel(context.Background())
+	if lt, ok := task.(LongTask); ok {
+		return state{ctx, func() { lt.Cancel(); cancel() }, make(chan struct{})}
+	} else {
+		return state{ctx, cancel, make(chan struct{})}
+	}
+}
+
+func NewRunner(options ...func(*Runner)) *Runner {
+	runner := &Runner{ResolverFunc(Resolve), make(map[string]Node)}
+	for _, option := range options {
+		option(runner)
+	}
+	return runner
+}
+
+func (r *Runner) Task(name string, task Task, deps ...string) *Runner {
+	r.Tasks[name] = Node{name, task, deps}
 	return r
 }
 
-func (r Runner) Resolve(node Node) ([]string, error) {
+func Resolve(node Node, tasks map[string]Node) ([]string, error) {
 	var seen, resolved []string
 	var resolve func(node Node) error
 
@@ -62,7 +81,7 @@ func (r Runner) Resolve(node Node) ([]string, error) {
 				if in(dep, seen) {
 					return ErrDepCircular
 				}
-				node, ok := r[dep]
+				node, ok := tasks[dep]
 				if !ok {
 					return ErrDepNotFound
 				}
@@ -78,7 +97,7 @@ func (r Runner) Resolve(node Node) ([]string, error) {
 }
 
 func clean(running map[string]state, resolved []string, done chan error) (err error) {
-	cleaned := make(chan bool)
+	cleaned := make(chan struct{})
 	for {
 		select {
 		case e := <-done:
@@ -89,11 +108,11 @@ func clean(running map[string]state, resolved []string, done chan error) (err er
 			go func() {
 				defer close(cleaned)                     // close channel only when all tasks are canceled
 				for _, name := range reverse(resolved) { // ensure all task are closed
-					running[name].CancelFunc()
-					<-running[name].Done
+					running[name].cancel()
+					<-running[name].done
 				}
 			}()
-		case <-running[""].Done:
+		case <-running[""].done:
 			if err == nil { // if an error exists, there's a cleaning running
 				return
 			}
@@ -103,47 +122,32 @@ func clean(running map[string]state, resolved []string, done chan error) (err er
 	}
 }
 
-func abort() Task {
-	return TaskFunc(func(ctx context.Context) error {
-		interrupt := make(chan os.Signal)
-		signal.Notify(interrupt, os.Interrupt)
-		select {
-		case <-interrupt:
-			return ErrInterrupt
-		case <-ctx.Done():
-		}
-		return nil
-	})
-}
-
-func noop() Task { return TaskFunc(func(_ context.Context) error { return nil }) }
-
-func (runner Runner) Start(tasks ...string) error {
+func (runner *Runner) Start(tasks ...string) error {
 	done := make(chan error)
 	running := map[string]state{}
-	root := runner.Task("abort", abort()).Task("", noop(), tasks...)[""]
-	resolved, err := runner.Resolve(root)
-
+	root := runner.Task("", TaskFunc(func(_ context.Context) error {
+		return ErrFinished
+	}), tasks...).Tasks[""]
+	resolved, err := runner.Resolve(root, runner.Tasks)
 	if err != nil {
 		return err
 	}
-	resolved = append(resolved, "abort")
 
 	for _, name := range resolved {
-		ctx, cancel := context.WithCancel(context.Background())
-		running[name] = state{cancel, make(chan bool)}
+		running[name] = newState(runner.Tasks[name].Task)
+		go func(name string) {
+			state := running[name]
+			defer close(state.done)
 
-		go func(ctx context.Context, node Node, s state) {
-			defer close(s.Done)
-			for _, dep := range node.Deps {
+			for _, dep := range runner.Tasks[name].Deps {
 				select {
-				case <-ctx.Done(): // if interrupt don't wait any longer
+				case <-state.context.Done(): // if interrupt don't wait any longer
 					return
-				case <-running[dep].Done: // wait for dependencies to finish
+				case <-running[dep].done: // wait for dependencies to finish
 				}
 			}
-			done <- node.Task.Start(ctx) // start job
-		}(ctx, runner[name], running[name])
+			done <- runner.Tasks[name].Task.Start(state.context) // start job
+		}(name)
 	}
 
 	return clean(running, resolved, done)

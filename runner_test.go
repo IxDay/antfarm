@@ -3,12 +3,12 @@ package antfarm
 import (
 	"context"
 	"fmt"
-	"os"
 	"testing"
-	"time"
 )
 
 type buffer []string
+
+var noop = TaskFunc(func(_ context.Context) error { return nil })
 
 func (b *buffer) NewTask(message string) Task {
 	return TaskFunc(func(ctx context.Context) error {
@@ -48,9 +48,9 @@ func TestDependencyOrder(t *testing.T) {
 
 func TestDependencyErr(t *testing.T) {
 	runner := Runner{}.
-		Task("foo", noop(), "bar").
-		Task("bar", noop(), "foo").
-		Task("baz", noop(), "quz")
+		Task("foo", noop, "bar").
+		Task("bar", noop, "foo").
+		Task("baz", noop, "quz")
 
 	unexpectedErr(t, runner.Start("baz"), ErrDepNotFound)
 	unexpectedErr(t, runner.Start("bar"), ErrDepCircular)
@@ -61,38 +61,9 @@ func TestErrorPropagation(t *testing.T) {
 	ErrBaz := fmt.Errorf("baz")
 
 	runner := Runner{}.
-		Task("foo", noop()).
+		Task("foo", noop).
 		Task("bar", Error(ErrBar), "foo").
 		Task("baz", Error(ErrBaz), "bar")
 
 	unexpectedErr(t, runner.Start("baz"), ErrBar)
-}
-
-func TestInterrupt(t *testing.T) {
-	var err error
-	var stop = make(chan bool)
-	var start = make(chan bool)
-
-	go func() {
-		defer close(stop)
-		err = Runner{}.
-			Task("infinite", TaskFunc(func(ctx context.Context) error {
-				close(start)
-				for {
-					select {
-					case <-ctx.Done():
-						return nil
-					default:
-						time.Sleep(50 * time.Millisecond)
-					}
-				}
-			})).
-			Start("infinite")
-	}()
-	<-start
-	p, err := os.FindProcess(os.Getpid())
-	unexpectedErr(t, err, nil)
-	unexpectedErr(t, p.Signal(os.Interrupt), nil)
-	<-stop
-	unexpectedErr(t, err, ErrInterrupt)
 }

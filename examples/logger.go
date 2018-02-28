@@ -8,10 +8,10 @@ import (
 	"time"
 )
 
-type runner struct{ antfarm.Runner }
+type Runner struct{ antfarm.Runner }
 
-func NewRunner() runner { return runner{antfarm.Runner{}} }
-func (r runner) Task(name string, task antfarm.Task, deps ...string) runner {
+func NewRunner() Runner { return Runner{antfarm.Runner{}} }
+func (r Runner) Task(name string, task antfarm.Task, deps ...string) Runner {
 	r.Runner = r.Runner.Task(name, antfarm.TaskFunc(func(ctx context.Context) error {
 		fmt.Printf("starting task: %s...\n", name)
 		if err := task.Start(ctx); err != nil {
@@ -26,8 +26,8 @@ func (r runner) Task(name string, task antfarm.Task, deps ...string) runner {
 func main() {
 	fmt.Println(NewRunner().
 		Task("wait", tasks.Wait(5*time.Second)).
-		Task("world", tasks.Print("Hello World!"), "bar", "foo").
-		Task("foo", tasks.Print("Hello Foo!")).
-		Task("bar", tasks.Print("Hello Bar!"), "foo", "wait").
+		Task("world", tasks.Print("Hello World!\n"), "bar", "foo").
+		Task("foo", tasks.Print("Hello Foo!\n")).
+		Task("bar", tasks.Print("Hello Bar!\n"), "foo", "wait").
 		Start("world"))
 }

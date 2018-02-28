@@ -15,9 +15,10 @@ func main() {
 
 	fmt.Println(antfarm.Runner{}.
 		Task("wait", tasks.Wait(5*time.Second)).
-		Task("world", tasks.Print("Hello World!"), "bar", "foo").
-		Task("foo", tasks.Print("Hello Foo!")).
-		Task("bar", tasks.Print("Hello Bar!"), "foo", "wait").
-		Task("ssh", rulz.Run("ls -la")).
-		Start("ssh"))
+		Task("world", tasks.Print("Hello World!\n"), "bar", "foo").
+		Task("foo", tasks.Print("Hello Foo!\n")).
+		Task("bar", tasks.Print("Hello Bar!\n"), "foo", "wait").
+		Task("ls", rulz.Run("ls -la")).
+		Task("echo", rulz.Run("echo foo"), "ls").
+		Start("world"))
 }
